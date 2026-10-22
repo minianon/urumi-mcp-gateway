@@ -59,9 +59,28 @@ function systemPrompt(user: User): string {
   ].join('\n');
 }
 
+/**
+ * Models often send `null` for optional arguments, and providers such as Groq validate tool calls
+ * against the schema strictly. So the LLM sees optional properties as nullable, and nulls are
+ * stripped again before the call goes to the gateway (upstream schemas stay untouched).
+ */
+function nullableOptionals(schema: Tool['inputSchema']): Record<string, unknown> {
+  const required = new Set(schema.required ?? []);
+  const properties: Record<string, unknown> = {};
+  for (const [name, prop] of Object.entries(schema.properties ?? {}) as [string, Record<string, unknown>][]) {
+    if (required.has(name)) properties[name] = prop;
+    else if (typeof prop.type === 'string') {
+      properties[name] = { ...prop, type: [prop.type, 'null'], ...(Array.isArray(prop.enum) ? { enum: [...prop.enum, null] } : {}) };
+    } else properties[name] = { anyOf: [prop, { type: 'null' }] };
+  }
+  return { ...schema, properties };
+}
+
+const stripNulls = (args: Record<string, unknown>) => Object.fromEntries(Object.entries(args).filter(([, v]) => v !== null));
+
 const toOpenAiTool = (t: Tool): ChatCompletionTool => ({
   type: 'function',
-  function: { name: t.name, description: truncate(t.description ?? '', 1_000), parameters: t.inputSchema as Record<string, unknown> },
+  function: { name: t.name, description: truncate(t.description ?? '', 1_000), parameters: nullableOptionals(t.inputSchema) },
 });
 
 function resultText(r: CallToolResult): string {
@@ -123,7 +142,7 @@ export async function* runAgent(user: User, message: string, rawHistory: unknown
       for (const call of calls) {
         let args: Record<string, unknown> = {};
         try {
-          args = call.function.arguments ? JSON.parse(call.function.arguments) : {};
+          args = call.function.arguments ? stripNulls(JSON.parse(call.function.arguments)) : {};
         } catch {
           /* malformed JSON from the model: let the upstream validation complain */
         }
@@ -155,9 +174,10 @@ async function createWithRetry(body: OpenAI.Chat.Completions.ChatCompletionCreat
   try {
     return await llm.chat.completions.create(body, { signal });
   } catch (err) {
-    // Groq returns 400 tool_use_failed when the model emits a malformed tool call; one retry
-    // usually fixes it.
-    if (err instanceof OpenAI.APIError && err.status === 400 && JSON.stringify(err.error ?? '').includes('tool_use_failed')) {
+    // Groq returns 400 when the model emits a malformed or schema-violating tool call; the model
+    // samples differently on retry, which usually fixes it.
+    const detail = err instanceof OpenAI.APIError ? `${JSON.stringify(err.error ?? '')} ${err.message}` : '';
+    if (err instanceof OpenAI.APIError && err.status === 400 && /tool_use_failed|tool call validation failed/i.test(detail)) {
       return await llm.chat.completions.create(body, { signal });
     }
     throw err;
