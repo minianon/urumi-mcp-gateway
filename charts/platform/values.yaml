@@ -1,0 +1,104 @@
+# Public origin of the dashboard + MCP endpoint (MCP URL = publicUrl + /mcp).
+publicUrl: "http://app.127.0.0.1.nip.io"
+
+ingress:
+  enabled: true
+  className: traefik
+  host: app.127.0.0.1.nip.io
+  annotations: {}
+  tls:
+    enabled: false
+    secretName: ""
+
+# All credentials. Pass them with `-f deploy/secrets/<env>/platform.yaml` (git-ignored, generated
+# by scripts/gen-secrets.sh) or point existingSecret at a Secret you manage (sealed-secrets,
+# external-secrets, ...). Secret keys: session-secret, encryption-key, api-key-pepper,
+# admin-password, postgres-password, llm-api-key, upstream-<slug>-token
+secrets:
+  existingSecret: ""
+  sessionSecret: ""
+  encryptionKey: "" # 32 random bytes, base64
+  apiKeyPepper: ""
+  adminPassword: ""
+  postgresPassword: ""
+  llmApiKey: "" # optional: chat agent is disabled without it
+  upstreamTokens: {} # slug -> bearer token for bootstrap servers
+
+gateway:
+  image:
+    repository: urumi/gateway
+    tag: dev
+    pullPolicy: IfNotPresent
+  # >1 works without sticky sessions: MCP session ids are signed tokens any replica can verify.
+  replicas: 2
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: "1", memory: 512Mi }
+  cookieSecure: false
+  rateLimitPerMinute: 120
+  upstream:
+    defaultTimeoutMs: 15000
+    connectTimeoutMs: 5000
+    healthIntervalMs: 10000
+  ssrf:
+    enabled: true
+    # Extra cluster-internal hostnames admins may register (bootstrap servers are always allowed).
+    allowedHosts: []
+  bootstrapAdmin:
+    email: admin@urumi.local
+    name: Admin
+  # Upstream servers registered automatically ("managed by Helm"). The token for each comes from
+  # secrets.upstreamTokens[slug].
+  bootstrapServers:
+    - slug: woocommerce
+      name: WooCommerce
+      url: http://store-mcp.store-main.svc.cluster.local:3000/mcp
+      authType: bearer
+      adminOnlyTools: [create_product, update_product, update_order_status]
+    - slug: supplier
+      name: Supplier
+      url: http://supplier.mcp-tools.svc.cluster.local:3000/mcp
+      authType: bearer
+  llm:
+    provider: groq
+    baseUrl: https://api.groq.com/openai/v1
+    model: openai/gpt-oss-120b
+    maxSteps: 8
+    directToolLimit: 40
+
+dashboard:
+  image:
+    repository: urumi/dashboard
+    tag: dev
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests: { cpu: 10m, memory: 16Mi }
+    limits: { cpu: 200m, memory: 64Mi }
+
+postgres:
+  image: postgres:17.9-alpine
+  storageClass: ""
+  size: 2Gi
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: "1", memory: 512Mi }
+
+networkPolicies:
+  enabled: true
+  ingressController:
+    namespace: kube-system
+    podLabels:
+      app.kubernetes.io/name: traefik
+  dns:
+    namespace: kube-system
+    podLabels:
+      k8s-app: kube-dns
+  # Namespaces hosting in-cluster MCP servers the gateway may call.
+  upstreamNamespaces:
+    - { namespace: store-main, port: 3000 }
+    - { namespace: mcp-tools, port: 3000 }
+  # Namespace allowed to scrape /metrics (port 9464). Empty = nobody.
+  metricsScraperNamespace: ""
+
+imagePullSecrets: []

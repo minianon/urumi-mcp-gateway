@@ -1,0 +1,113 @@
+{{- if .Values.networkPolicies.enabled }}
+{{- $np := .Values.networkPolicies }}
+# Deny by default, then:
+#   ingress controller --> gateway:8080, dashboard:8080      (the only public entry points)
+#   gateway            --> postgres:5432
+#   gateway            --> in-cluster MCP namespaces (store-main, mcp-tools, ...)
+#   gateway            --> internet:80/443, never RFC1918/link-local (external MCP servers, LLM API)
+#   everyone           --> cluster DNS
+# The egress rule is the third SSRF layer: even a bug in the URL checks cannot reach
+# 169.254.169.254 or arbitrary cluster services.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-default-deny
+  labels: {{- include "platform.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-allow-dns
+  labels: {{- include "platform.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $np.dns.namespace }}
+          podSelector:
+            matchLabels: {{- toYaml $np.dns.podLabels | nindent 14 }}
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-public
+  labels: {{- include "platform.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/name, operator: In, values: [gateway, dashboard] }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $np.ingressController.namespace }}
+          podSelector:
+            matchLabels: {{- toYaml $np.ingressController.podLabels | nindent 14 }}
+      ports:
+        - { protocol: TCP, port: 8080 }
+    {{- with $np.metricsScraperNamespace }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+      ports:
+        - { protocol: TCP, port: 9464 }
+    {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-gateway-egress
+  labels: {{- include "platform.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "platform.selector" (dict "root" . "name" "gateway") | nindent 6 }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: {{- include "platform.selector" (dict "root" . "name" "postgres") | nindent 14 }}
+      ports:
+        - { protocol: TCP, port: 5432 }
+    {{- range $np.upstreamNamespaces }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .namespace }}
+      ports:
+        - { protocol: TCP, port: {{ .port }} }
+    {{- end }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10, 127.0.0.0/8]
+      ports:
+        - { protocol: TCP, port: 443 }
+        - { protocol: TCP, port: 80 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-postgres
+  labels: {{- include "platform.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "platform.selector" (dict "root" . "name" "postgres") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {{- include "platform.selector" (dict "root" . "name" "gateway") | nindent 14 }}
+      ports:
+        - { protocol: TCP, port: 5432 }
+{{- end }}

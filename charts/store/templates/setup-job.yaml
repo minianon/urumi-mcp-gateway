@@ -1,0 +1,103 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-setup
+  labels: {{- include "store.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation
+data:
+  setup.sh: |-
+{{ .Files.Get "files/setup.sh" | indent 4 }}
+  api-key.php: |-
+{{ .Files.Get "files/api-key.php" | indent 4 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-setup
+  labels: {{- include "store.labels" . | nindent 4 }}
+    app.kubernetes.io/component: setup
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+    # Keep the last run (and its logs) until the next upgrade replaces it.
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 6
+  activeDeadlineSeconds: {{ .Values.setup.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels: {{- include "store.labels" . | nindent 8 }}
+        app.kubernetes.io/component: setup
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      # wordpress:cli is Alpine (www-data = 82); run as 33 to match the Apache image's files.
+      securityContext: {{- include "store.podSecurity" (dict "uid" 33) | nindent 8 }}
+      # The WordPress volume is ReadWriteOnce: schedule next to the WordPress pod.
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels: {{- include "store.selector" (dict "root" . "component" "wordpress") | nindent 18 }}
+              topologyKey: kubernetes.io/hostname
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: setup
+          image: {{ .Values.setup.image }}
+          securityContext: {{- include "store.containerSecurity" . | nindent 12 }}
+          command: ["/bin/sh", "/setup/setup.sh"]
+          env:
+            {{- include "store.wpEnv" . | nindent 12 }}
+            - name: HOME
+              value: /tmp
+            - name: WP_CLI_CACHE_DIR
+              value: /tmp/wp-cli-cache
+            - name: STORE_NAME
+              value: {{ .Values.store.name | quote }}
+            - name: STORE_TIMEZONE
+              value: {{ .Values.store.timezone | quote }}
+            - name: STORE_CURRENCY
+              value: {{ .Values.store.currency | quote }}
+            - name: STORE_COUNTRY
+              value: {{ .Values.store.country | quote }}
+            - name: SAMPLE_PRODUCTS
+              value: {{ .Values.store.sampleProducts | quote }}
+            - name: WP_ADMIN_USER
+              value: {{ .Values.store.adminUser | quote }}
+            - name: WP_ADMIN_EMAIL
+              value: {{ .Values.store.adminEmail | quote }}
+            - name: WP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ include "store.secretName" . }}, key: wp-admin-password }
+            - name: WC_VERSION
+              value: {{ .Values.setup.woocommerceVersion | quote }}
+            - name: WP_THEME
+              value: {{ .Values.setup.theme | quote }}
+            - name: WC_CONSUMER_KEY
+              valueFrom:
+                secretKeyRef: { name: {{ include "store.secretName" . }}, key: wc-consumer-key }
+            - name: WC_CONSUMER_SECRET
+              valueFrom:
+                secretKeyRef: { name: {{ include "store.secretName" . }}, key: wc-consumer-secret }
+          resources: {{- toYaml .Values.setup.resources | nindent 12 }}
+          volumeMounts:
+            - name: html
+              mountPath: /var/www/html
+            - name: setup
+              mountPath: /setup
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: html
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-wordpress
+        - name: setup
+          configMap:
+            name: {{ .Release.Name }}-setup
+        - name: tmp
+          emptyDir: {}

@@ -1,0 +1,116 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-wordpress
+  labels: {{- include "store.labels" . | nindent 4 }}
+  annotations:
+    # Uploads and plugins live here; never delete them on `helm uninstall` by accident.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- include "store.storageClass" . | nindent 2 }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.wordpressSize }}
+---
+# Apache listens on 8080 so the container can run as www-data without NET_BIND_SERVICE.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-apache
+  labels: {{- include "store.labels" . | nindent 4 }}
+data:
+  ports.conf: |
+    Listen 8080
+  000-default.conf: |
+    <VirtualHost *:8080>
+      ServerAdmin webmaster@localhost
+      DocumentRoot /var/www/html
+      ErrorLog ${APACHE_LOG_DIR}/error.log
+      # Keep kubelet probes out of the access log.
+      SetEnvIf User-Agent "^kube-probe" dontlog
+      CustomLog ${APACHE_LOG_DIR}/access.log combined env=!dontlog
+    </VirtualHost>
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-wordpress
+  labels: {{- include "store.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "store.selector" (dict "root" . "component" "wordpress") | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-wordpress
+  labels: {{- include "store.labels" . | nindent 4 }}
+    app.kubernetes.io/component: wordpress
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # ReadWriteOnce volume: the old pod must release it first
+  selector:
+    matchLabels: {{- include "store.selector" (dict "root" . "component" "wordpress") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "store.labels" . | nindent 8 }}
+        app.kubernetes.io/component: wordpress
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+    spec:
+      securityContext: {{- include "store.podSecurity" (dict "uid" 33) | nindent 8 }}
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: wordpress
+          image: {{ .Values.wordpress.image }}
+          securityContext: {{- include "store.containerSecurity" . | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env: {{- include "store.wpEnv" . | nindent 12 }}
+          startupProbe:
+            httpGet: { path: /wp-includes/images/blank.gif, port: http }
+            periodSeconds: 5
+            failureThreshold: 60
+          # Ready = PHP can talk to MariaDB (wp-login.php returns 500 without a DB).
+          readinessProbe:
+            httpGet: { path: /wp-login.php, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # Alive = Apache answers. Deliberately DB-independent so a DB outage does not
+          # restart-loop WordPress.
+          livenessProbe:
+            httpGet: { path: /wp-includes/images/blank.gif, port: http }
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources: {{- toYaml .Values.wordpress.resources | nindent 12 }}
+          volumeMounts:
+            - name: html
+              mountPath: /var/www/html
+            - name: apache
+              mountPath: /etc/apache2/ports.conf
+              subPath: ports.conf
+            - name: apache
+              mountPath: /etc/apache2/sites-enabled/000-default.conf
+              subPath: 000-default.conf
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: html
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-wordpress
+        - name: apache
+          configMap:
+            name: {{ .Release.Name }}-apache
+        - name: tmp
+          emptyDir: {}

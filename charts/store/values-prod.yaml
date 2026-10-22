@@ -1,0 +1,34 @@
+# Production-like VPS (single-node k3s). Only these values differ from local.
+store:
+  publicUrl: "https://store.example.com" # CHANGE ME: your domain
+  adminEmail: "ops@example.com"
+
+ingress:
+  host: store.example.com
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+  tls:
+    enabled: true
+
+persistence:
+  storageClass: local-path # k3s default; swap for longhorn/ebs/etc. on multi-node clusters
+  mariadbSize: 10Gi
+  wordpressSize: 10Gi
+
+mariadb:
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { cpu: "2", memory: 1Gi }
+
+wordpress:
+  environmentType: production
+  resources:
+    requests: { cpu: 250m, memory: 384Mi }
+    limits: { cpu: "2", memory: 768Mi }
+
+mcp:
+  image:
+    repository: ghcr.io/CHANGE_ME/urumi-woo-mcp
+    tag: "1.0.0"
+    pullPolicy: IfNotPresent

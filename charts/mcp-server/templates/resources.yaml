@@ -1,0 +1,116 @@
+{{- if not .Values.secrets.existingSecret }}
+{{- if not .Values.secrets.authToken }}{{ fail "secrets.authToken is required (run scripts/gen-secrets.sh)" }}{{ end }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "mcp.secretName" . }}
+  labels: {{- include "mcp.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  auth-token: {{ .Values.secrets.authToken | quote }}
+---
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}
+  labels: {{- include "mcp.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "mcp.selector" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.port }}
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels: {{- include "mcp.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels: {{- include "mcp.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "mcp.labels" . | nindent 8 }}
+      annotations:
+        checksum/secret: {{ .Values.secrets.authToken | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: mcp
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          ports:
+            - name: http
+              containerPort: {{ .Values.port }}
+          env:
+            - name: PORT
+              value: {{ .Values.port | quote }}
+            - name: MCP_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef: { name: {{ include "mcp.secretName" . }}, key: auth-token }
+            {{- range $k, $v := .Values.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          readinessProbe:
+            httpGet: { path: {{ .Values.probes.readinessPath }}, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: {{ .Values.probes.livenessPath }}, port: http }
+            periodSeconds: 15
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+{{- if .Values.networkPolicies.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}
+  labels: {{- include "mcp.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "mcp.selector" . | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.allowedClients.namespace }}
+          podSelector:
+            matchLabels: {{- toYaml .Values.allowedClients.podLabels | nindent 14 }}
+      ports:
+        - { protocol: TCP, port: {{ .Values.port }} }
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicies.dns.namespace }}
+          podSelector:
+            matchLabels: {{- toYaml .Values.networkPolicies.dns.podLabels | nindent 14 }}
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    {{- if .Values.networkPolicies.allowInternetEgress }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10]
+      ports:
+        - { protocol: TCP, port: 443 }
+    {{- end }}
+{{- end }}

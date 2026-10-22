@@ -1,0 +1,6 @@
+apiVersion: v2
+name: platform
+description: Urumi team MCP gateway - gateway backend (MCP server + client + chat agent), dashboard and Postgres
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

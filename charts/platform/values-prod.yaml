@@ -1,0 +1,26 @@
+publicUrl: "https://app.example.com" # CHANGE ME
+ingress:
+  host: app.example.com
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+  tls:
+    enabled: true
+gateway:
+  image: { repository: ghcr.io/CHANGE_ME/urumi-gateway, tag: "1.0.0", pullPolicy: IfNotPresent }
+  replicas: 2
+  cookieSecure: true # cookies only over HTTPS
+  bootstrapAdmin:
+    email: ops@example.com
+  resources:
+    requests: { cpu: 200m, memory: 192Mi }
+    limits: { cpu: "2", memory: 768Mi }
+dashboard:
+  image: { repository: ghcr.io/CHANGE_ME/urumi-dashboard, tag: "1.0.0", pullPolicy: IfNotPresent }
+  replicas: 2
+postgres:
+  storageClass: local-path
+  size: 10Gi
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { cpu: "2", memory: 1Gi }

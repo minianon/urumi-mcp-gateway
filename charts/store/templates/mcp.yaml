@@ -1,0 +1,79 @@
+{{- if .Values.mcp.enabled }}
+# The store's private MCP server. ClusterIP only, no Ingress; a NetworkPolicy admits only the
+# gateway pods, and it additionally requires the gateway's bearer token.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-mcp
+  labels: {{- include "store.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "store.selector" (dict "root" . "component" "mcp") | nindent 4 }}
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-mcp
+  labels: {{- include "store.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mcp
+spec:
+  replicas: {{ .Values.mcp.replicas }}
+  selector:
+    matchLabels: {{- include "store.selector" (dict "root" . "component" "mcp") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "store.labels" . | nindent 8 }}
+        app.kubernetes.io/component: mcp
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+    spec:
+      securityContext: {{- include "store.podSecurity" (dict "uid" 1000) | nindent 8 }}
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: mcp
+          image: "{{ .Values.mcp.image.repository }}:{{ .Values.mcp.image.tag }}"
+          imagePullPolicy: {{ .Values.mcp.image.pullPolicy }}
+          securityContext:
+            {{- include "store.containerSecurity" . | nindent 12 }}
+            readOnlyRootFilesystem: true
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: PORT
+              value: "3000"
+            - name: WOO_BASE_URL
+              value: "http://{{ .Release.Name }}-wordpress.{{ .Release.Namespace }}.svc.cluster.local"
+            - name: WOO_PUBLIC_URL
+              value: {{ .Values.store.publicUrl | quote }}
+            - name: STORE_NAME
+              value: {{ .Values.store.name | quote }}
+            - name: STORE_TIMEZONE
+              value: {{ .Values.store.timezone | quote }}
+            - name: REQUEST_TIMEOUT_MS
+              value: {{ .Values.mcp.requestTimeoutMs | quote }}
+            - name: WOO_CONSUMER_KEY
+              valueFrom:
+                secretKeyRef: { name: {{ include "store.secretName" . }}, key: wc-consumer-key }
+            - name: WOO_CONSUMER_SECRET
+              valueFrom:
+                secretKeyRef: { name: {{ include "store.secretName" . }}, key: wc-consumer-secret }
+            - name: MCP_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef: { name: {{ include "store.secretName" . }}, key: mcp-token }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 15
+            failureThreshold: 3
+          resources: {{- toYaml .Values.mcp.resources | nindent 12 }}
+{{- end }}

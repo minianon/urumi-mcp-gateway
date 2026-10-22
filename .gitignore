@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.log
+.env
+.env.*
+!.env.example
+# Generated per-environment secrets (see scripts/gen-secrets.sh)
+deploy/secrets/*.yaml
+!deploy/secrets/*.example.yaml
+.DS_Store

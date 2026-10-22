@@ -1,0 +1,38 @@
+image:
+  repository: urumi/supplier-mcp
+  tag: dev
+  pullPolicy: IfNotPresent
+replicas: 1
+port: 3000
+# Plain (non-secret) environment variables.
+env: {}
+
+# The bearer token the gateway must present. Stored in a Secret, exposed as MCP_AUTH_TOKEN.
+secrets:
+  existingSecret: "" # must contain key "auth-token"
+  authToken: ""
+
+resources:
+  requests: { cpu: 25m, memory: 48Mi }
+  limits: { cpu: 250m, memory: 128Mi }
+
+probes:
+  readinessPath: /readyz
+  livenessPath: /healthz
+
+# Only these pods can reach the server (NetworkPolicy).
+allowedClients:
+  namespace: urumi
+  podLabels:
+    app.kubernetes.io/name: gateway
+
+networkPolicies:
+  enabled: true
+  # Most MCP servers that wrap a SaaS API need outbound HTTPS; the demo supplier does not.
+  allowInternetEgress: false
+  dns:
+    namespace: kube-system
+    podLabels:
+      k8s-app: kube-dns
+
+imagePullSecrets: []

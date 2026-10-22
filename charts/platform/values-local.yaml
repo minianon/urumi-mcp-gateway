@@ -1,0 +1,10 @@
+publicUrl: "http://app.127.0.0.1.nip.io"
+ingress:
+  host: app.127.0.0.1.nip.io
+gateway:
+  image: { repository: urumi/gateway, tag: dev, pullPolicy: Never }
+  replicas: 2
+  upstream:
+    healthIntervalMs: 5000 # notice a dead upstream quickly during the demo
+dashboard:
+  image: { repository: urumi/dashboard, tag: dev, pullPolicy: Never }

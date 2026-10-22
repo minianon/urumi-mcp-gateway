@@ -1,0 +1,171 @@
+{{- $g := .Values.gateway }}
+{{- $servers := list }}
+{{- range $g.bootstrapServers }}
+{{- $s := deepCopy . }}
+{{- if hasKey $.Values.secrets.upstreamTokens .slug }}
+{{- $_ := set $s "credentialEnv" (include "platform.tokenEnv" .slug) }}
+{{- end }}
+{{- $servers = append $servers $s }}
+{{- end }}
+# The gateway never talks to the Kubernetes API: no token is mounted at all.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Release.Name }}-gateway
+  labels: {{- include "platform.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-gateway
+  labels: {{- include "platform.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "platform.selector" (dict "root" . "name" "gateway") | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+    - name: metrics
+      port: 9464
+      targetPort: metrics
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-gateway
+  labels: {{- include "platform.labels" . | nindent 4 }}
+    app.kubernetes.io/name: gateway
+spec:
+  replicas: {{ $g.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 } # zero-downtime upgrades
+  selector:
+    matchLabels: {{- include "platform.selector" (dict "root" . "name" "gateway") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "platform.labels" . | nindent 8 }}
+        app.kubernetes.io/name: gateway
+        app.kubernetes.io/version: {{ $g.image.tag | quote }}
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9464"
+    spec:
+      serviceAccountName: {{ .Release.Name }}-gateway
+      automountServiceAccountToken: false
+      securityContext: {{- include "platform.podSecurity" (dict "uid" 1000) | nindent 8 }}
+      terminationGracePeriodSeconds: 30
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {{- include "platform.selector" (dict "root" . "name" "gateway") | nindent 14 }}
+      containers:
+        - name: gateway
+          image: "{{ $g.image.repository }}:{{ $g.image.tag }}"
+          imagePullPolicy: {{ $g.image.pullPolicy }}
+          securityContext: {{- include "platform.containerSecurity" . | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: metrics
+              containerPort: 9464
+          env:
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - name: APP_VERSION
+              value: {{ $g.image.tag | quote }}
+            - name: PUBLIC_URL
+              value: {{ .Values.publicUrl | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ include "platform.secretName" . }}, key: postgres-password }
+            - name: DATABASE_URL
+              value: "postgres://urumi:$(POSTGRES_PASSWORD)@{{ .Release.Name }}-postgres:5432/urumi"
+            - name: SESSION_SECRET
+              valueFrom:
+                secretKeyRef: { name: {{ include "platform.secretName" . }}, key: session-secret }
+            - name: ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef: { name: {{ include "platform.secretName" . }}, key: encryption-key }
+            - name: API_KEY_PEPPER
+              valueFrom:
+                secretKeyRef: { name: {{ include "platform.secretName" . }}, key: api-key-pepper }
+            - name: BOOTSTRAP_ADMIN_EMAIL
+              value: {{ $g.bootstrapAdmin.email | quote }}
+            - name: BOOTSTRAP_ADMIN_NAME
+              value: {{ $g.bootstrapAdmin.name | quote }}
+            - name: BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ include "platform.secretName" . }}, key: admin-password }
+            - name: BOOTSTRAP_SERVERS
+              value: {{ $servers | toJson | quote }}
+            {{- range $slug, $_ := .Values.secrets.upstreamTokens }}
+            - name: {{ include "platform.tokenEnv" $slug }}
+              valueFrom:
+                secretKeyRef: { name: {{ include "platform.secretName" $ }}, key: upstream-{{ $slug }}-token }
+            {{- end }}
+            - name: COOKIE_SECURE
+              value: {{ $g.cookieSecure | quote }}
+            - name: RATE_LIMIT_PER_MINUTE
+              value: {{ $g.rateLimitPerMinute | quote }}
+            - name: UPSTREAM_DEFAULT_TIMEOUT_MS
+              value: {{ $g.upstream.defaultTimeoutMs | quote }}
+            - name: UPSTREAM_CONNECT_TIMEOUT_MS
+              value: {{ $g.upstream.connectTimeoutMs | quote }}
+            - name: UPSTREAM_HEALTH_INTERVAL_MS
+              value: {{ $g.upstream.healthIntervalMs | quote }}
+            - name: SSRF_PROTECTION
+              value: {{ $g.ssrf.enabled | quote }}
+            - name: SSRF_ALLOWED_HOSTS
+              value: {{ join "," $g.ssrf.allowedHosts | quote }}
+            - name: LLM_PROVIDER
+              value: {{ $g.llm.provider | quote }}
+            - name: LLM_BASE_URL
+              value: {{ $g.llm.baseUrl | quote }}
+            - name: LLM_MODEL
+              value: {{ $g.llm.model | quote }}
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef: { name: {{ include "platform.secretName" . }}, key: llm-api-key, optional: true }
+            - name: AGENT_MAX_STEPS
+              value: {{ $g.llm.maxSteps | quote }}
+            - name: AGENT_DIRECT_TOOL_LIMIT
+              value: {{ $g.llm.directToolLimit | quote }}
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 3
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 5
+            failureThreshold: 2
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 15
+            failureThreshold: 3
+          resources: {{- toYaml $g.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- if gt (int $g.replicas) 1 }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Release.Name }}-gateway
+  labels: {{- include "platform.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {{- include "platform.selector" (dict "root" . "name" "gateway") | nindent 6 }}
+{{- end }}

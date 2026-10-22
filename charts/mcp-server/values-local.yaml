@@ -1,0 +1,4 @@
+image:
+  repository: urumi/supplier-mcp
+  tag: dev
+  pullPolicy: Never

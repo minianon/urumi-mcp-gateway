@@ -1,0 +1,17 @@
+# Local k3d cluster. Domain: *.127.0.0.1.nip.io resolves to 127.0.0.1 via public DNS, so no
+# hosts-file edits are needed (see README "Local domains").
+store:
+  publicUrl: "http://store.127.0.0.1.nip.io"
+  adminEmail: "admin@urumi.local"
+
+ingress:
+  host: store.127.0.0.1.nip.io
+
+wordpress:
+  environmentType: local
+
+mcp:
+  image:
+    repository: urumi/woo-mcp
+    tag: dev
+    pullPolicy: Never # images are imported into k3d with `k3d image import`
