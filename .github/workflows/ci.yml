@@ -27,6 +27,8 @@ jobs:
         working-directory: services/${{ matrix.service }}
       - run: npx tsc --noEmit
         working-directory: services/${{ matrix.service }}
+      - run: npm test --if-present
+        working-directory: services/${{ matrix.service }}
       - run: npm run build
         working-directory: services/${{ matrix.service }}
 

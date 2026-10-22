@@ -74,6 +74,10 @@ spec:
           livenessProbe:
             httpGet: { path: {{ .Values.probes.livenessPath }}, port: http }
             periodSeconds: 15
+          # Endpoint removal and SIGTERM race: wait until Traefik/kube-proxy stop routing here.
+          lifecycle:
+            preStop:
+              exec: { command: ["sleep", "5"] }
           resources: {{- toYaml .Values.resources | nindent 12 }}
 {{- if .Values.networkPolicies.enabled }}
 ---

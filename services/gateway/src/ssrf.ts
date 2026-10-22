@@ -40,7 +40,8 @@ for (const [addr, prefix] of [
   ['fe80::', 10], // link-local
   ['ff00::', 8], // multicast
   ['64:ff9b::', 96], // NAT64
-  ['::ffff:0:0', 96], // IPv4-mapped (any spelling)
+  // No ::ffff:0:0/96 rule: BlockList treats IPv4-mapped IPv6 and IPv4 as the same address, so
+  // that rule would block every IPv4 address. Mapped addresses are matched by the IPv4 rules.
 ] as const)
   blocked.addSubnet(addr, prefix, 'ipv6');
 

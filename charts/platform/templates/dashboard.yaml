@@ -48,6 +48,10 @@ spec:
           livenessProbe:
             httpGet: { path: /healthz, port: http }
             periodSeconds: 15
+          # Endpoint removal and SIGTERM race: wait until Traefik/kube-proxy stop routing here.
+          lifecycle:
+            preStop:
+              exec: { command: ["sleep", "5"] }
           resources: {{- toYaml $d.resources | nindent 12 }}
           volumeMounts:
             - name: tmp

@@ -29,7 +29,9 @@ app.set('trust proxy', 1); // Traefik in front: req.ip is the real client
 
 // Liveness: the process is up. Readiness: we can reach Postgres (otherwise take us out of the Service).
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
+let draining = false;
 app.get('/readyz', async (_req, res) => {
+  if (draining) return void res.status(503).json({ ok: false, draining: true });
   try {
     await pool.query('SELECT 1');
     res.json({ ok: true, pod: config.podName });
@@ -73,11 +75,16 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
 const server = app.listen(config.port, () => console.log(`gateway ${config.podName} listening on :${config.port}, public URL ${config.publicUrl}`));
 startMetricsServer();
 
+// Graceful shutdown. The preStop hook already gave the Service/Ingress time to stop routing
+// here; we additionally report not-ready, let in-flight requests (tool calls, chat streams)
+// finish, and only then close. Together these make rolling updates and rollbacks lossless.
 for (const sig of ['SIGTERM', 'SIGINT'] as const) {
   process.on(sig, () => {
     console.log(`${sig}: draining`);
+    draining = true;
     upstreams.stop();
     server.close(() => void pool.end().finally(() => process.exit(0)));
-    setTimeout(() => process.exit(0), 15_000).unref();
+    server.closeIdleConnections();
+    setTimeout(() => process.exit(0), 20_000).unref();
   });
 }

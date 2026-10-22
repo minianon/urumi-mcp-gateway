@@ -122,7 +122,9 @@ The upstream side uses the official SDK client. For the downstream side I implem
 - `Mcp-Session-Id` is an **HMAC-signed token** bound to the user, so any replica can validate it.
 - **Every request re-authenticates the API key**, so revocation takes effect immediately on all replicas. Open SSE streams re-check every 20 s.
 - Change notifications (a server disabled, a tool approved, a user's role changed) fan out to all replicas through Postgres `LISTEN/NOTIFY`. Each replica pushes `tools/list_changed` to the SSE streams it holds. A client like Claude Code sees tools appear and disappear **live**.
-- It is tested with the official SDK client (protocol `2025-11-25`) in `tests/e2e.mjs`. It also speaks `2025-06-18`, `2025-03-26` and `2024-11-05`.
+- It is tested with the official SDK client (protocol `2025-11-25`) in `tests/e2e.mjs`, and with MCP Inspector. It also speaks `2025-06-18`, `2025-03-26` and `2024-11-05`.
+- **Consistency:** each replica connects to each upstream on its own, so right after an admin adds a server the replicas can disagree briefly. Measured on k3d with DeepWiki: `tools/list` alternated 0/3 tools for about 1.5 s, then converged. Clients get `tools/list_changed` when their replica catches up.
+- **Graceful shutdown:** a `preStop` pause gives Traefik time to drop the pod before `SIGTERM`. The gateway then reports not-ready, finishes in-flight calls and exits. Measured: before this, a rollback under load lost 6 of 528 calls (502/504); after it, a `rollout restart` plus a `helm rollback` lost **0 of 525**.
 
 ### 3.4 Chat agent
 

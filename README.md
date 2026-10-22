@@ -194,8 +194,9 @@ helm history platform -n urumi
 REGISTRY=... TAG=v1.1.0 scripts/deploy.sh prod      # upgrade = new image tag
 helm rollback platform <REVISION> -n urumi          # rollback = previous revision
 ```
-- **Gateway / dashboard:** RollingUpdate with `maxUnavailable: 0` and a PodDisruptionBudget, so at
-  least one gateway replica is always serving. MCP sessions survive the roll because session IDs are
+- **Gateway / dashboard:** RollingUpdate with `maxUnavailable: 0`, a PodDisruptionBudget, a `preStop`
+  pause and in-app draining. Tested on k3d: 0 failed calls out of 525 during a `rollout restart` plus a
+  `helm rollback` under continuous traffic. MCP sessions survive the roll because session IDs are
   signed tokens any replica accepts. DB migrations are forward-only and additive (expand/contract),
   so the previous image runs against the newer schema and rollback is safe.
 - **MCP servers:** stateless, so a rolling update is invisible to the gateway beyond in-flight calls.
