@@ -4,7 +4,7 @@ metadata:
   name: {{ .Release.Name }}-setup
   labels: {{- include "store.labels" . | nindent 4 }}
   annotations:
-    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook: post-install,post-upgrade,post-rollback
     helm.sh/hook-weight: "-5"
     helm.sh/hook-delete-policy: before-hook-creation
 data:
@@ -20,7 +20,7 @@ metadata:
   labels: {{- include "store.labels" . | nindent 4 }}
     app.kubernetes.io/component: setup
   annotations:
-    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook: post-install,post-upgrade,post-rollback
     helm.sh/hook-weight: "0"
     # Keep the last run (and its logs) until the next upgrade replaces it.
     helm.sh/hook-delete-policy: before-hook-creation

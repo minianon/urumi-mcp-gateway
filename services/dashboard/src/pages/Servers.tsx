@@ -162,7 +162,8 @@ export function ServersPage() {
   const [editing, setEditing] = useState<Server | undefined>()
   const [removing, setRemoving] = useState<Server | null>(null)
 
-  const list = [...(servers.data ?? [])].sort((a, b) => a.name.localeCompare(b.name))
+  // Keep the API's order: Helm-managed servers first, in registration order (WooCommerce is #1).
+  const list = servers.data ?? []
   const editingLive = editing ? (servers.data?.find((s) => s.id === editing.id) ?? editing) : undefined
 
   return (

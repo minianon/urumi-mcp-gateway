@@ -120,7 +120,9 @@ export function toMcpTool(t: CatalogTool): Tool {
  * poisoning patterns visible during review.
  */
 export function flagsFor(def: ToolDefinition, allToolNames: string[]): string[] {
-  const text = `${def.title ?? ''}\n${def.description}\n${JSON.stringify(def.inputSchema)}`;
+  // Scan what the model reads: titles, descriptions and schema text, minus the "$schema" URI.
+  const { $schema: _ignored, ...schema } = (def.inputSchema ?? {}) as Record<string, unknown>;
+  const text = `${def.title ?? ''}\n${def.description}\n${JSON.stringify(schema)}`;
   const flags: string[] = [];
   if (/ignore (all |any )?(previous|prior|above|earlier) (instructions|prompts|messages)|disregard (the |all )?(previous |prior )?instructions|you are now|new instructions/i.test(text))
     flags.push('instruction-override');
