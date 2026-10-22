@@ -9,11 +9,11 @@ import crypto from 'node:crypto';
  * each request is HMAC-signed with a timestamp + nonce, so a sniffed request cannot be replayed or
  * altered.
  *
- * WooCommerce's verifier (WC_REST_Authentication::check_oauth_signature) differs slightly from
- * RFC 5849, so we mirror it:
+ * We mirror WooCommerce's verifier (WC_REST_Authentication::check_oauth_signature) exactly:
  *  - params = query string params + oauth_* params (JSON bodies are not signed)
- *  - keys sorted with strcmp on the raw keys, then key and value rawurlencode()d once
- *  - joined with "%3D" and "%26" (i.e. not double-encoded like the RFC)
+ *  - keys sorted with strcmp on the raw keys
+ *  - each pair is rawurlencode(rawurlencode(k) + "=" + rawurlencode(v)), i.e. double-encoded as
+ *    in RFC 5849, and pairs are joined with "%26"
  *  - base URI = rawurlencode(get_home_url(path)) with the scheme forced to http when the request
  *    itself is not over TLS. That is why we sign against the public host with an http:// scheme
  *    even though we connect to the in-cluster Service address.
@@ -42,7 +42,7 @@ export function signRequest(opts: {
 
   const normalized = Object.keys(params)
     .sort() // ASCII keys: JS code-unit order == PHP strcmp
-    .map((k) => `${rawurlencode(k)}%3D${rawurlencode(params[k]!)}`)
+    .map((k) => rawurlencode(`${rawurlencode(k)}=${rawurlencode(params[k]!)}`))
     .join('%26');
 
   const base = [opts.method.toUpperCase(), rawurlencode(opts.signingBaseUrl + opts.path), normalized].join('&');

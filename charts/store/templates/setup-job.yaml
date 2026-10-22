@@ -12,6 +12,10 @@ data:
 {{ .Files.Get "files/setup.sh" | indent 4 }}
   api-key.php: |-
 {{ .Files.Get "files/api-key.php" | indent 4 }}
+  # Tells wp-cli that Apache has mod_rewrite, so `wp rewrite --hard` writes .htaccess.
+  wp-cli.yml: |
+    apache_modules:
+      - mod_rewrite
 ---
 apiVersion: batch/v1
 kind: Job
@@ -57,6 +61,8 @@ spec:
               value: /tmp
             - name: WP_CLI_CACHE_DIR
               value: /tmp/wp-cli-cache
+            - name: WP_CLI_CONFIG_PATH
+              value: /setup/wp-cli.yml
             - name: STORE_NAME
               value: {{ .Values.store.name | quote }}
             - name: STORE_TIMEZONE
@@ -88,6 +94,7 @@ spec:
           volumeMounts:
             - name: html
               mountPath: /var/www/html
+              subPath: html
             - name: setup
               mountPath: /setup
             - name: tmp

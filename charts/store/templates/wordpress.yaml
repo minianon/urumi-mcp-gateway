@@ -68,6 +68,19 @@ spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets: {{- toYaml . | nindent 8 }}
       {{- end }}
+      # The volume root belongs to root; the WordPress entrypoint's tar would fail to chmod it.
+      # Give WordPress a subdirectory it owns instead of running anything as root.
+      initContainers:
+        - name: prepare-volume
+          image: {{ .Values.wordpress.image }}
+          command: ["sh", "-c", "mkdir -p /data/html"]
+          securityContext: {{- include "store.containerSecurity" . | nindent 12 }}
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { cpu: 100m, memory: 64Mi }
+          volumeMounts:
+            - name: html
+              mountPath: /data
       containers:
         - name: wordpress
           image: {{ .Values.wordpress.image }}
@@ -97,6 +110,7 @@ spec:
           volumeMounts:
             - name: html
               mountPath: /var/www/html
+              subPath: html
             - name: apache
               mountPath: /etc/apache2/ports.conf
               subPath: ports.conf

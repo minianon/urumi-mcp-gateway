@@ -4,6 +4,8 @@
 set -eu
 cd /var/www/html
 log() { echo "[setup] $*"; }
+# Cosmetic options must never fail the whole setup (some are guarded by WooCommerce filters).
+opt() { wp option update "$@" >/dev/null 2>&1 || log "warning: could not set option $1"; }
 
 log "waiting for WordPress files and wp-config.php (created by the WordPress pod on first start)"
 until [ -f wp-config.php ] && [ -f wp-includes/version.php ]; do sleep 3; done
@@ -39,10 +41,10 @@ log "configuring WooCommerce"
 wp option update woocommerce_currency "$STORE_CURRENCY" >/dev/null
 wp option update woocommerce_default_country "$STORE_COUNTRY" >/dev/null
 wp option update woocommerce_coming_soon no >/dev/null # new stores start in "coming soon" mode
-wp option update woocommerce_store_pages_only no >/dev/null
-wp option update woocommerce_onboarding_profile '{"skipped":true}' --format=json >/dev/null
-wp option update woocommerce_task_list_hidden yes >/dev/null
-wp option update woocommerce_allow_tracking no >/dev/null
+opt woocommerce_store_pages_only no
+opt woocommerce_onboarding_profile '{"skipped":true}' --format=json
+opt woocommerce_task_list_hidden yes
+opt woocommerce_allow_tracking no
 wp option update woocommerce_cod_settings \
   '{"enabled":"yes","title":"Cash on delivery","description":"Pay with cash upon delivery.","instructions":"Pay with cash upon delivery.","enable_for_methods":[],"enable_for_virtual":"yes"}' \
   --format=json >/dev/null

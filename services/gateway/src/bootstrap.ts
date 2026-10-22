@@ -1,7 +1,7 @@
 import { sameCredential } from './api/servers.ts';
 import { config } from './config.ts';
 import { encryptSecret, hashPassword } from './crypto.ts';
-import { q, q1 } from './db.ts';
+import { pool, q, q1 } from './db.ts';
 import { allowHost } from './ssrf.ts';
 
 /** Create the first admin from Helm values (password comes from a Secret). Never overwrites. */
@@ -60,7 +60,15 @@ async function ensureServers() {
   }
 }
 
+/** Replicas start concurrently: serialise bootstrap with the same advisory lock as migrations. */
 export async function bootstrap() {
-  await ensureAdmin();
-  await ensureServers();
+  const client = await pool.connect();
+  try {
+    await client.query('SELECT pg_advisory_lock(727274)');
+    await ensureAdmin();
+    await ensureServers();
+  } finally {
+    await client.query('SELECT pg_advisory_unlock(727274)').catch(() => {});
+    client.release();
+  }
 }
