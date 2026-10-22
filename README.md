@@ -174,7 +174,7 @@ The **same charts**; only `values-prod.yaml` and the secrets differ (see the tab
 4. **Images:** push a tag `v1.0.0`, and CI (`.github/workflows/ci.yml`) builds multi-arch images to
    `ghcr.io/<owner>/urumi-*:v1.0.0`. Without a registry, use
    `docker save urumi/gateway:TAG | ssh vps sudo k3s ctr images import -` per image.
-5. **Values:** replace `example.com` and `CHANGE_ME` in the three `values-prod.yaml` files.
+5. **Values:** replace `example.com` with your domain in the three `values-prod.yaml` files (images already point at `ghcr.io/minianon/urumi-*:v1.0.0`).
 6. **Secrets and deploy:**
    ```bash
    LLM_API_KEY=gsk_... scripts/gen-secrets.sh prod   # writes deploy/secrets/prod/*.yaml (keep these off git)
