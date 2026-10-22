@@ -9,3 +9,4 @@ deploy/secrets/**
 !deploy/secrets/README.md
 .DS_Store
 deploy/.last-image-tag
+.claude/
