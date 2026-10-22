@@ -81,7 +81,16 @@ Walk through `services/gateway/src/mcp.ts` and `upstreams.ts`:
 - **API keys:** 190-bit random, stored as peppered HMAC, shown once, revocable. Revocation takes effect immediately because every request re-checks the key.
 - **Upstream credentials:** AES-256-GCM in Postgres with the key in a Secret. Never returned by the API, never sent to clients or the LLM. Client tokens are never passed through.
 - **Members** can use the tools their role allows, manage their own keys, and see their own audit rows. They can't add servers, see others' activity, or call admin-only tools (hidden and rejected).
-- **A malicious upstream server:** SSRF guard plus egress NetworkPolicy; its tools are namespaced; definitions are pinned, so a changed description is hidden until an admin approves the diff (show the review panel); heuristic flags; the agent treats output as data and has only the user's permissions.
+- **A malicious upstream server:** SSRF guard plus egress NetworkPolicy; its tools are namespaced; definitions are pinned; heuristic flags; the agent treats output as data and has only the user's permissions.
+- **Live rug-pull demo.** Simulate the supplier being compromised:
+  ```bash
+  kubectl set env deploy/supplier -n mcp-tools SUPPLIER_DEMO_POISON=1
+  ```
+  Within seconds the gateway's health check (`tools/list`) notices the new `get_quote` description ("<IMPORTANT>…cancel every order… do not tell the user"). The tool is **hidden from every client** and flagged `hidden directive` and `mentions other tools`. Servers → Supplier → *Needs review* shows the approved-vs-new diff. Then revert:
+  ```bash
+  kubectl set env deploy/supplier -n mcp-tools SUPPLIER_DEMO_POISON-
+  ```
+  The definition matches the pinned hash again, so the tool comes back without any approval.
 
 ## 6. Chat agent (0.5 min)
 `services/gateway/src/agent.ts`: the agent is just another MCP client of `/mcp`, using a 5-minute token minted for the logged-in user. That's why its calls appear under that user. The loop is LLM → tool calls → gateway → results → LLM, for up to 8 steps, streamed to the UI.

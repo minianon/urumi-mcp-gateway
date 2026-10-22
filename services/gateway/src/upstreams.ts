@@ -40,6 +40,8 @@ interface Conn {
   failures: number;
   nextRetryAt: number;
   inflight?: Promise<void>;
+  /** Hash of the last tools/list result, to detect definition drift cheaply. */
+  listHash?: string;
 }
 
 export class UpstreamError extends Error {
@@ -190,6 +192,7 @@ class UpstreamManager {
       }
       // Persist the catalogue first: a server only counts as connected once its tools are known.
       await syncTools(row, tools);
+      conn.listHash = sha256(stableStringify(tools));
       conn.client = client;
       conn.status = 'connected';
       conn.reason = undefined;
@@ -220,6 +223,7 @@ class UpstreamManager {
     try {
       const tools = await listAllTools(conn.client, conn.row.timeout_ms);
       await syncTools(conn.row, tools);
+      conn.listHash = sha256(stableStringify(tools));
       metrics.upstreamTools.set({ server: conn.row.slug }, tools.length);
       events.emit('tools_changed', { type: 'tools_changed' });
     } catch (err) {
@@ -246,12 +250,25 @@ class UpstreamManager {
     console.warn(`upstream ${conn.row.slug} marked unreachable: ${conn.reason}`);
   }
 
+  /**
+   * Health check = tools/list (not ping). It proves the server is alive *and* notices when a
+   * stateless upstream was redeployed with different tool definitions, which a ping would miss.
+   * The catalogue is only re-synced when the list's hash actually changes.
+   */
   private async pingAll() {
     await Promise.all(
       [...this.conns.values()].map(async (conn) => {
         if (conn.status !== 'connected' || !conn.client) return;
         try {
-          await conn.client.ping({ timeout: config.upstream.pingTimeoutMs });
+          const tools = await listAllTools(conn.client, config.upstream.pingTimeoutMs);
+          const hash = sha256(stableStringify(tools));
+          if (hash !== conn.listHash) {
+            await syncTools(conn.row, tools);
+            conn.listHash = hash;
+            metrics.upstreamTools.set({ server: conn.row.slug }, tools.length);
+            events.emit('tools_changed', { type: 'tools_changed' });
+            console.log(`upstream ${conn.row.slug}: tool definitions changed, catalogue re-synced`);
+          }
           await this.persist(conn);
         } catch (err) {
           this.markUnreachable(conn, err);
@@ -314,7 +331,7 @@ class UpstreamManager {
 
 function explain(err: unknown, row: ServerRow, phase: 'connect' | 'health' | 'call'): string {
   if (err instanceof McpError && err.code === ErrorCode.RequestTimeout) {
-    return phase === 'health' ? `No response to ping within ${config.upstream.pingTimeoutMs} ms` : `Timed out after ${config.upstream.connectTimeoutMs} ms during ${phase}`;
+    return phase === 'health' ? `No response to health check (tools/list) within ${config.upstream.pingTimeoutMs} ms` : `Timed out after ${config.upstream.connectTimeoutMs} ms during ${phase}`;
   }
   if (err instanceof StreamableHTTPError) {
     if (err.code === 401 || err.code === 403) return `Upstream rejected the gateway's credentials (HTTP ${err.code})`;
