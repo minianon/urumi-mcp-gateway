@@ -1,5 +1,5 @@
 image:
-  repository: ghcr.io/CHANGE_ME/urumi-supplier-mcp
+  repository: ghcr.io/minianon/urumi-supplier-mcp
   tag: "1.0.0"
   pullPolicy: IfNotPresent
 replicas: 2
