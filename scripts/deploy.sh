@@ -3,8 +3,10 @@
 # values. Used for the VPS; local-up.sh does the same for k3d plus building images.
 #
 #   REGISTRY=ghcr.io/<owner> TAG=1.0.0 scripts/deploy.sh prod
+#   SITE=wsl-k3s REGISTRY=ghcr.io/<owner> TAG=v1.0.0 scripts/deploy.sh prod
 #
 # Expects deploy/secrets/<env>/{store,supplier,platform}.yaml (scripts/gen-secrets.sh <env>).
+# SITE layers deploy/sites/<site>/<release>.yaml (domain, issuer) between the env values and secrets.
 set -euo pipefail
 
 ENV_NAME="${1:?usage: deploy.sh <env>}"
@@ -15,6 +17,9 @@ S="$ROOT/deploy/secrets/$ENV_NAME"
 cd "$ROOT"
 [[ -f "$S/platform.yaml" ]] || { echo "missing $S/*.yaml - run scripts/gen-secrets.sh $ENV_NAME"; exit 1; }
 
+# site <release>: "-f deploy/sites/$SITE/<release>.yaml" when that file exists
+site() { [[ -n "${SITE:-}" && -f "deploy/sites/$SITE/$1.yaml" ]] && echo "-f deploy/sites/$SITE/$1.yaml" || true; }
+
 echo "Deploying $ENV_NAME to context $(kubectl config current-context) with images $REGISTRY/urumi-*:$TAG"
 
 for ns in store-main mcp-tools urumi; do
@@ -24,17 +29,17 @@ for ns in store-main mcp-tools urumi; do
 done
 
 helm upgrade --install store charts/store -n store-main \
-  -f "charts/store/values-$ENV_NAME.yaml" -f "$S/store.yaml" \
+  -f "charts/store/values-$ENV_NAME.yaml" $(site store) -f "$S/store.yaml" \
   --set mcp.image.repository="$REGISTRY/urumi-woo-mcp" --set mcp.image.tag="$TAG" \
   --wait --timeout 15m
 
 helm upgrade --install supplier charts/mcp-server -n mcp-tools \
-  -f "charts/mcp-server/values-$ENV_NAME.yaml" -f "$S/supplier.yaml" \
+  -f "charts/mcp-server/values-$ENV_NAME.yaml" $(site supplier) -f "$S/supplier.yaml" \
   --set image.repository="$REGISTRY/urumi-supplier-mcp" --set image.tag="$TAG" \
   --wait --timeout 5m
 
 helm upgrade --install platform charts/platform -n urumi \
-  -f "charts/platform/values-$ENV_NAME.yaml" -f "$S/platform.yaml" \
+  -f "charts/platform/values-$ENV_NAME.yaml" $(site platform) -f "$S/platform.yaml" \
   --set gateway.image.repository="$REGISTRY/urumi-gateway" --set gateway.image.tag="$TAG" \
   --set dashboard.image.repository="$REGISTRY/urumi-dashboard" --set dashboard.image.tag="$TAG" \
   --wait --timeout 10m

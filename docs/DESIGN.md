@@ -185,6 +185,11 @@ Both are hidden from everyone until an admin reviews a side-by-side diff in the 
 
 No template has an `if prod` branch. The environment is entirely in the values files.
 
+One more layer sits between the environment values and the secrets: `deploy/sites/<site>/`, holding
+only what differs between two prod installs (the domain and the cert-manager issuer). The prod path
+is verified on real k3s in WSL with `SITE=wsl-k3s`, which also carries that host's two node add-ons
+(a private CA issuer and Traefik on 8080/8443). The README explains why.
+
 ## 7. Tradeoffs I made consciously
 
 - **Own charts instead of Bitnami's WordPress chart.** Bitnami images moved behind a paywall in 2025. Writing the templates also means I can explain every line, including probes, PSA, NetworkPolicies and the hook Job.

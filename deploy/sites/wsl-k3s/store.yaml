@@ -1,0 +1,8 @@
+# Site overrides on top of charts/store/values-prod.yaml: domain and certificate issuer only.
+store:
+  publicUrl: "https://store.prod.127.0.0.1.nip.io:8443"
+  adminEmail: "admin@urumi.local"
+ingress:
+  host: store.prod.127.0.0.1.nip.io
+  annotations:
+    cert-manager.io/cluster-issuer: urumi-local-ca

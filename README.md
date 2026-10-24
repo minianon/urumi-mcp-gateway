@@ -171,14 +171,16 @@ The **same charts**; only `values-prod.yaml` and the secrets differ (see the tab
        solvers: [{ http01: { ingress: { ingressClassName: traefik } } }]
    EOF
    ```
-4. **Images:** push a tag `v1.0.0`, and CI (`.github/workflows/ci.yml`) builds multi-arch images to
-   `ghcr.io/<owner>/urumi-*:v1.0.0`. Without a registry, use
-   `docker save urumi/gateway:TAG | ssh vps sudo k3s ctr images import -` per image.
-5. **Values:** replace `example.com` with your domain in the three `values-prod.yaml` files (images already point at `ghcr.io/minianon/urumi-*:v1.0.0`).
+4. **Images:** pushing a tag such as `v1.0.0` makes CI (`.github/workflows/ci.yml`) build multi-arch
+   images to `ghcr.io/<owner>/urumi-*:v1.0.0`. The `v1.0.0` images are published and public. Without
+   a registry, use `docker save urumi/gateway:TAG | ssh vps sudo k3s ctr images import -` per image.
+5. **Site values:** copy `deploy/sites/wsl-k3s/{store,platform}.yaml` to `deploy/sites/<site>/`, and set
+   your domain (no port) and `cert-manager.io/cluster-issuer: letsencrypt-prod`. These files hold only
+   the domain and the issuer; everything else comes from `values-prod.yaml`.
 6. **Secrets and deploy:**
    ```bash
    LLM_API_KEY=gsk_... scripts/gen-secrets.sh prod   # writes deploy/secrets/prod/*.yaml (keep these off git)
-   REGISTRY=ghcr.io/<owner> TAG=v1.0.0 scripts/deploy.sh prod
+   SITE=<site> REGISTRY=ghcr.io/<owner> TAG=v1.0.0 scripts/deploy.sh prod
    ```
    To manage secrets out of band instead (sealed-secrets, external-secrets, SOPS), create the
    Secrets yourself and set `secrets.existingSecret` in each chart.
@@ -186,6 +188,55 @@ The **same charts**; only `values-prod.yaml` and the secrets differ (see the tab
 What changes between local and prod: domain and `publicUrl`; TLS plus cert-manager annotations on the
 Ingress; storage class and sizes; image registry and tags; `cookieSecure: true`; resource sizes;
 replica counts.
+
+### Production rehearsal: real k3s in WSL (what the demo shows)
+
+I don't have a VPS, so I run the production path on a **real k3s** install inside WSL Ubuntu, not
+k3d. It uses `values-prod.yaml`, the published `ghcr.io/minianon/urumi-*:v1.0.0` images, cert-manager
+TLS and the prod secrets, deployed with `scripts/deploy.sh prod`. Compared with a VPS, only two
+files differ:
+
+- `deploy/sites/wsl-k3s/issuer.yaml`: a private CA issuer, because Let's Encrypt cannot reach a laptop.
+- `deploy/sites/wsl-k3s/traefik-config.yaml`: Traefik moves to 8080/8443, because Docker Desktop
+  (the k3d cluster) already holds 80/443. It also runs on the host network, because WSL only
+  forwards ports that a process really listens on, and ServiceLB uses iptables rules instead.
+
+The dev cluster and the prod rehearsal run side by side:
+
+| | Local (k3d) | Prod rehearsal (k3s in WSL) |
+|---|---|---|
+| Dashboard / MCP | http://app.127.0.0.1.nip.io | https://app.prod.127.0.0.1.nip.io:8443 |
+| Storefront | http://store.127.0.0.1.nip.io | https://store.prod.127.0.0.1.nip.io:8443 |
+| kubectl | default context `k3d-urumi` | `KUBECONFIG=~/.kube/wsl-k3s.yaml` |
+
+Setup, from Git Bash on Windows:
+
+```bash
+export MSYS_NO_PATHCONV=1   # stop Git Bash rewriting /var/... into C:/Program Files/Git/var/...
+wsl -d Ubuntu -u root -- mkdir -p /var/lib/rancher/k3s/server/manifests
+wsl -d Ubuntu -u root -- cp "/mnt/d/Personal/urumi/deploy/sites/wsl-k3s/traefik-config.yaml" /var/lib/rancher/k3s/server/manifests/
+wsl -d Ubuntu -u root -- sh -c "curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='server --write-kubeconfig-mode 644' sh -"
+wsl -d Ubuntu -u root -- cat /etc/rancher/k3s/k3s.yaml | sed 's/: default$/: wsl-k3s/' > ~/.kube/wsl-k3s.yaml
+export KUBECONFIG=~/.kube/wsl-k3s.yaml
+helm repo add jetstack https://charts.jetstack.io
+helm install cert-manager jetstack/cert-manager -n cert-manager --create-namespace --set crds.enabled=true --wait
+kubectl apply -f deploy/sites/wsl-k3s/issuer.yaml
+scripts/gen-secrets.sh prod
+SITE=wsl-k3s REGISTRY=ghcr.io/minianon TAG=v1.0.0 scripts/deploy.sh prod
+```
+
+WSL stops a distro when no terminal is attached, and k3s stops with it. While you use the cluster,
+keep an Ubuntu terminal open, or start a hidden keep-alive from PowerShell:
+`Start-Process -WindowStyle Hidden wsl.exe '-d','Ubuntu','--','sleep','infinity'`.
+
+Browsers will warn about the certificate until you trust the CA. To trust it, export it with
+`kubectl -n cert-manager get secret urumi-local-ca -o jsonpath='{.data.ca\.crt}' | base64 -d > urumi-local-ca.crt`
+and import it into *Trusted Root Certification Authorities*. Node-based MCP clients read the same
+file from `NODE_EXTRA_CA_CERTS`. On Windows, curl needs `--ssl-no-revoke`, because a private CA
+publishes no revocation list. Verified on this setup:
+- the e2e suite passes against `https://app.prod.127.0.0.1.nip.io:8443`;
+- the chat agent answers through the gateway;
+- a pod in another namespace cannot reach woo-mcp, WordPress or MariaDB.
 
 ## Upgrades and rollback
 
@@ -221,7 +272,7 @@ helm rollback platform <REVISION> -n urumi          # rollback = previous revisi
 | **Many tools:** `?mode=search` meta-tools; the agent switches automatically above 40 tools | `gateway/src/mcp.ts`, `agent.ts` |
 | **Observability:** Prometheus `/metrics` on an internal port (calls, errors, latency per server, upstream up/down); dashboard overview from the audit log; precise unreachable reasons | `gateway/src/metrics.ts`, Overview page |
 | **Upgrades and rollback:** zero-downtime gateway rolls, a pinned WooCommerce version, a rollback hook | section above |
-| **Production-like deployment:** prod values, cert-manager TLS, CI multi-arch images to GHCR | `values-prod.yaml`, `.github/workflows/ci.yml` |
+| **Production-like deployment:** prod values, cert-manager TLS, CI multi-arch images to GHCR (`v1.0.0` published), deployed and verified on real k3s with the prod values (in WSL, not a public VPS) | `values-prod.yaml`, `deploy/sites/`, `.github/workflows/ci.yml`, "Production rehearsal" above |
 
 Not attempted: multi-store provisioning (bonus), OAuth on the gateway, hosted MCP servers by image.
 The store chart is already one-store-per-namespace with its own MCP server, which is the foundation

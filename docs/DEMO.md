@@ -96,4 +96,10 @@ Walk through `services/gateway/src/mcp.ts` and `upstreams.ts`:
 `services/gateway/src/agent.ts`: the agent is just another MCP client of `/mcp`, using a 5-minute token minted for the logged-in user. That's why its calls appear under that user. The loop is LLM → tool calls → gateway → results → LLM, for up to 8 steps, streamed to the UI.
 
 ## 7. Local to VPS (1 min)
-Show `charts/platform/values-local.yaml` next to `values-prod.yaml`: domain, TLS and cert-manager, storage class, registry and tags, `cookieSecure`, sizes. Then `scripts/deploy.sh prod`, `helm history`, `helm rollback`. Explain the zero-downtime gateway roll (maxUnavailable 0 + PDB) and the WooCommerce version pin with the post-upgrade/post-rollback Job.
+Show `charts/platform/values-local.yaml` next to `values-prod.yaml`: domain, TLS and cert-manager, storage class, registry and tags, `cookieSecure`, sizes. Then switch to the prod rehearsal (`KUBECONFIG=~/.kube/wsl-k3s.yaml`):
+- `kubectl get nodes`: real k3s, not k3d;
+- `kubectl get pods -A -o wide`: the images come from `ghcr.io/minianon/urumi-*:v1.0.0`;
+- `kubectl get certificate -A`: cert-manager issued certificates for both hosts;
+- open https://app.prod.127.0.0.1.nip.io:8443 and the storefront.
+
+Then `helm history`, `helm rollback`. Explain the zero-downtime gateway roll (maxUnavailable 0 + PDB) and the WooCommerce version pin with the post-upgrade/post-rollback Job.

@@ -1,0 +1,29 @@
+# k3s add-on override: copied to /var/lib/rancher/k3s/server/manifests/ on the node.
+# WSL-only. Two quirks of running k3s inside WSL next to Docker Desktop:
+#  - ports 80/443 belong to Docker Desktop (the k3d dev cluster), so Traefik uses 8080/8443;
+#  - WSL forwards a port to Windows only when a process really listens on it, and k3s's ServiceLB
+#    publishes ports with iptables rules, so Traefik runs on the host network instead.
+# On a real VPS you skip this file: Traefik keeps 80/443 behind ServiceLB.
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    hostNetwork: true
+    service:
+      spec:
+        type: ClusterIP # no ServiceLB pod competing for the host ports
+    updateStrategy:
+      type: RollingUpdate
+      rollingUpdate: { maxUnavailable: 1, maxSurge: 0 } # the old pod must free the host ports first
+    ports:
+      traefik:
+        port: 9000 # internal ping/dashboard entrypoint, off 8080
+      web:
+        port: 8080
+        exposedPort: 8080
+      websecure:
+        port: 8443
+        exposedPort: 8443
