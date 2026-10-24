@@ -23,14 +23,7 @@ data:
   ports.conf: |
     Listen 8080
   000-default.conf: |
-    <VirtualHost *:8080>
-      ServerAdmin webmaster@localhost
-      DocumentRoot /var/www/html
-      ErrorLog ${APACHE_LOG_DIR}/error.log
-      # Keep kubelet probes out of the access log.
-      SetEnvIf User-Agent "^kube-probe" dontlog
-      CustomLog ${APACHE_LOG_DIR}/access.log combined env=!dontlog
-    </VirtualHost>
+    {{- include "store.apacheSite" . | nindent 4 }}
 ---
 apiVersion: v1
 kind: Service
@@ -62,6 +55,7 @@ spec:
         app.kubernetes.io/component: wordpress
       annotations:
         checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        checksum/apache: {{ include "store.apacheSite" . | sha256sum }}
     spec:
       securityContext: {{- include "store.podSecurity" (dict "uid" 33) | nindent 8 }}
       automountServiceAccountToken: false

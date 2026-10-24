@@ -62,3 +62,26 @@ seccompProfile:
     define('AUTOMATIC_UPDATER_DISABLED', true);
     define('DISALLOW_FILE_EDIT', true);
 {{- end }}
+
+{{/*
+Apache vhost. ServerName carries the public scheme and port so Apache's own redirects (e.g.
+/wp-admin -> /wp-admin/) point at the Ingress, not at the container's port 8080. The hostname
+still comes from the request (UseCanonicalName Off), so in-cluster callers keep their Host.
+*/}}
+{{- define "store.apacheSite" -}}
+{{- $u := urlParse .Values.store.publicUrl -}}
+{{- $hostport := $u.host -}}
+{{- if not (contains ":" $u.host) -}}
+{{- $hostport = printf "%s:%s" $u.host (ternary "443" "80" (eq $u.scheme "https")) -}}
+{{- end -}}
+<VirtualHost *:8080>
+  ServerName {{ $u.scheme }}://{{ $hostport }}
+  UseCanonicalName Off
+  ServerAdmin webmaster@localhost
+  DocumentRoot /var/www/html
+  ErrorLog ${APACHE_LOG_DIR}/error.log
+  # Keep kubelet probes out of the access log.
+  SetEnvIf User-Agent "^kube-probe" dontlog
+  CustomLog ${APACHE_LOG_DIR}/access.log combined env=!dontlog
+</VirtualHost>
+{{- end }}

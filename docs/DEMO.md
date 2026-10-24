@@ -1,8 +1,10 @@
 # Demo video script (about 12 minutes)
 
 Before recording: run `scripts/local-up.sh` and log in to the dashboard as admin in one browser.
-Accept a member invite ("Bea", user B) in a private window. Create an API key for B. Open one
-terminal for `kubectl` and one for Claude Code or MCP Inspector.
+Log in as the member (user B) in a private window. Open one terminal for `kubectl` and one for
+Claude Code or MCP Inspector. Start Claude Code with `$env:ENABLE_CLAUDEAI_MCP_SERVERS="false"; claude`
+so your claude.ai connectors stay off screen. Place one storefront order today, and keep the
+prod-rehearsal cluster's WSL terminal open for section 7.
 
 The sections follow the brief's "Demo video requirements", in order.
 
@@ -20,7 +22,7 @@ kubectl get ns --show-labels | grep -E 'store-main|mcp-tools|urumi'   # restrict
 kubectl get pods,svc,ingress,pvc -n store-main
 kubectl get pods,svc,ingress,pvc -n urumi
 kubectl get networkpolicy -A
-kubectl get secret -n urumi platform-credentials -o jsonpath='{.data}' | head -c 200   # credentials only in Secrets
+kubectl describe secret -n urumi platform-credentials   # credentials only in Secrets (shows key names and sizes, not values)
 kubectl describe pod -n urumi -l app.kubernetes.io/name=gateway | grep -A3 -E 'Limits|Readiness|Liveness'
 ```
 Talking points:
@@ -59,7 +61,8 @@ Talking points:
 
 **Team and control**
 12. Admin → Team → All API keys → revoke B's key. B's next prompt fails with 401 (the audit log shows `unauthorized`).
-    - Re-issue a key for B before step 13.
+    - Re-issue a key for B before step 13: B → API keys → Create key, then
+      `claude mcp remove urumi -s user` and the `claude mcp add` line with the new key.
 13. Admin → Servers → disable **Supplier**. In Chat, ask a supplier question: the tool is gone. In Claude Code the tools disappear **live**, because the gateway pushes `tools/list_changed`.
     - Re-enable it.
 14. Kill the upstream pod and keep it dead:
