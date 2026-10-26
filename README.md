@@ -5,6 +5,8 @@ endpoint** (Claude Code, Cursor, MCP Inspector) and through a **chat agent** in 
 without ever seeing an upstream credential. The first data source is a WooCommerce store running
 in the same cluster, exposed by an MCP server I wrote.
 
+**Demo video:** https://youtu.be/v0f-Wj4IMMk (about 17 min, with chapters)
+
 ```
 store-main ns              mcp-tools ns           urumi ns                                   outside
 ┌──────────────────────┐   ┌──────────────┐   ┌───────────────────────────────────────┐
@@ -18,6 +20,7 @@ store-main ns              mcp-tools ns           urumi ns                      
 
 | | |
 |---|---|
+| **Demo video** | [youtu.be/v0f-Wj4IMMk](https://youtu.be/v0f-Wj4IMMk): the definition-of-done flow with two users, then Kubernetes, MCP internals, security and local-to-prod |
 | **Design & tradeoffs** | [docs/DESIGN.md](docs/DESIGN.md): architecture, tool aggregation, routing, failure handling, local vs prod |
 | **Threat model** | [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md): shared credentials, no token passthrough, malicious upstreams, member vs member |
 | **Demo script** | [docs/DEMO.md](docs/DEMO.md): the definition-of-done flow, step by step |
